@@ -3,142 +3,80 @@ import cv2
 import numpy as np
 from PIL import Image
 from roboflow import Roboflow
+import json
 import tempfile
 import os
+import streamlit as st
+# 99dfeee62adec0ce99ba5bc5b559352
 from py_edamam import Edamam
-from bmi import calculate_bmr, calculate_tdee
-
-# Store these values in Streamlit: Manage app -> Settings -> Secrets
+from bmi import calculate_bmr,calculate_tdee
 rf = Roboflow(api_key=st.secrets["ROBOFLOW_API_KEY"])
-workspace = rf.workspace("dhivyas-workspace-i4ksn")
-project = workspace.project("food-detection-2eqch-mmfp4")
+project = rf.workspace().project("-food-detection")
 model = project.version(1).model
 
+# infer on a local image
+def detect_image(image):
+    result=(model.predict(image, confidence=40, overlap=30).json())
 
-def detect_image(image_path):
-    """Return a detected food class, or None if no predictions are found."""
-    result = model.predict(image_path, confidence=30, overlap=30).json()
-    predictions = result.get("predictions") or []
-
-    if not predictions:
-        return None
-
-    return predictions[0].get("class") or None
+    return result['predictions'][0]['class']
 
 
 def getcalories(food_item):
-    e = Edamam(
-        nutrition_appid=st.secrets["EDAMAM_APP_ID"],
-        nutrition_appkey=st.secrets["EDAMAM_APP_KEY"],
-    )
-    data = e.search_nutrient("1 " + str(food_item))
-
-    if not data:
-        raise ValueError("No nutrition data was returned.")
-
-    return data.get("calories"), data.get("dietLabels") or [], data.get("totalWeight")
+     
+    e = Edamam(nutrition_appid='2d7c855d',
+            nutrition_appkey='3cb57ad0fb6b9cbf1f8623747575e942',
+            )
+            
+    data= e.search_nutrient("1"+str(food_item))
+    return data['calories'],data['dietLabels'],data['totalWeight']
 
 
 def main():
     st.title("Nutriment AI")
+    
     st.write("Please enter the following information:")
 
-    height = st.number_input(
-        "Height (m)", min_value=0.1, value=1.7, step=0.1, format="%.1f"
-    )
-    weight = st.number_input(
-        "Weight (kg)", min_value=1.0, value=60.0, step=0.1, format="%.1f"
-    )
-    age = st.number_input("Age (years)", min_value=1, value=25, step=1)
+    # Input fields
+    height = st.number_input("Height (m)", min_value=0.0, step=0.1, format="%.1f")
+    weight = st.number_input("Weight (kg)", min_value=0.0, step=0.1, format="%.1f")
+    age = st.number_input("Age (years)", min_value=0, step=1)
     gender = st.selectbox("Gender", options=["Male", "Female"])
-    activity_level = st.selectbox(
-        "Activity Level",
-        options=[
-            "Sedentary",
-            "Lightly Active",
-            "Moderately Active",
-            "Very Active",
-        ],
-    )
-
-    user_bmr = calculate_bmr(weight, height, age, gender)
-    user_tdee = calculate_tdee(float(user_bmr), activity_level)
+    activity_level = st.selectbox("Activity Level", options=["Sedentary", "Lightly Active", "Moderately Active", "Very Active"])
 
     if st.button("Calculate"):
-        st.write("### Your Health Metrics")
-        st.write(f"**BMI:** {weight / (height ** 2):.2f}")
-        st.write(f"**BMR:** {user_bmr:.2f} kcal")
-        st.write(f"**TDEE:** {user_tdee:.2f} kcal")
+        # Process inputs and perform calculations here
+        st.write("BMI:",weight / (height ** 2))
+        bmr=calculate_bmr(weight,height,age,gender)
+        st.write("BMR: "+str(bmr))
+        tdee=calculate_tdee(float(calculate_bmr(weight,height,age,gender)),activity_level)
+        st.write("TDEE: "+str(tdee))
 
-    uploaded_image = st.file_uploader(
-        "Upload an image", type=["jpg", "png", "jpeg"]
-    )
+
+
+    # Create an image upload widget
+    uploaded_image = st.file_uploader("Upload an image", type=["jpg", "png", "jpeg"])
 
     if uploaded_image is not None:
-        try:
-            image = Image.open(uploaded_image).convert("RGB")
-        except Exception:
-            st.error("Could not open that image. Please upload a valid JPG or PNG.")
-            return
+        # Display the uploaded image
+        image = Image.open(uploaded_image)
+        st.image(image, caption='Uploaded Image', use_column_width=True)
+        if uploaded_image:
+            temp_dir = tempfile.mkdtemp()
+            path = os.path.join(temp_dir, uploaded_image.name)
+            with open(path, "wb") as f:
+                    f.write(uploaded_image.getvalue())
+        # Perform object detection when 'Detect' button is clicked
+        if st.button("Detect"):
+            # Call object detection function
+            detected_image = detect_image(path)
+            calories = getcalories(detected_image)
+            # Display the detected image
+            str(st.text("Food Item: "+ detected_image))
+            # print(type(st.text(calories)))
+            st.text("Calories: "+str(calories[0]))
+            st.text("Diet: "+str(calories[1]))
+            st.text("Weight: "+str(calories[2])+' g')
+            st.text("Remaining calory intake: "+str(calculate_tdee(float(calculate_bmr(weight,height,age,gender)),activity_level)-calories[0]))
 
-        st.image(image, caption="Uploaded Image", use_container_width=True)
-
-        temp_path = None
-        try:
-            suffix = ".png" if uploaded_image.name.lower().endswith(".png") else ".jpg"
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
-                image.save(temp_file, format="PNG" if suffix == ".png" else "JPEG")
-                temp_path = temp_file.name
-
-            if st.button("Detect"):
-                with st.spinner("Detecting food..."):
-                    detected_food = detect_image(temp_path)
-
-                if not detected_food:
-                    st.warning(
-                        "No food item detected. Try a clear image of a supported food item."
-                    )
-                    return
-
-                st.success(f"Food Item Detected: {detected_food.title()}")
-
-                try:
-                    calories, diet_labels, total_weight = getcalories(detected_food)
-                    st.write("### Nutritional Breakdown")
-                    st.text(f"Food Item: {detected_food.title()}")
-
-                    if calories is not None:
-                        st.text(f"Calories: {calories} kcal")
-                        remaining = user_tdee - float(calories)
-                        st.info(
-                            f"Remaining daily calorie allowance: {remaining:.2f} kcal"
-                        )
-                    else:
-                        st.text("Calories: Not available")
-
-                    st.text(
-                        "Diet Labels: " + (", ".join(diet_labels) if diet_labels else "None")
-                    )
-                    st.text(
-                        f"Weight: {total_weight} g"
-                        if total_weight is not None
-                        else "Weight: Not available"
-                    )
-                except Exception:
-                    st.error(
-                        "Could not fetch nutrition data. Check your Edamam API credentials."
-                    )
-        except Exception:
-            st.error(
-                "Food detection failed. Check your Roboflow API credentials and try again."
-            )
-        finally:
-            if temp_path and os.path.exists(temp_path):
-                try:
-                    os.remove(temp_path)
-                except OSError:
-                    pass
-
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
