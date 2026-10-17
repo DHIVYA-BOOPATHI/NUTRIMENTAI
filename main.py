@@ -93,3 +93,52 @@ def main():
             if st.button("Detect"):
                 with st.spinner("Detecting food..."):
                     detected_food = detect_image(temp_path)
+
+                if not detected_food:
+                    st.warning(
+                        "No food item detected. Try a clear image of a supported food item."
+                    )
+                    return
+
+                st.success(f"Food Item Detected: {detected_food.title()}")
+
+                try:
+                    calories, diet_labels, total_weight = getcalories(detected_food)
+                    st.write("### Nutritional Breakdown")
+                    st.text(f"Food Item: {detected_food.title()}")
+
+                    if calories is not None:
+                        st.text(f"Calories: {calories} kcal")
+                        remaining = user_tdee - float(calories)
+                        st.info(
+                            f"Remaining daily calorie allowance: {remaining:.2f} kcal"
+                        )
+                    else:
+                        st.text("Calories: Not available")
+
+                    st.text(
+                        "Diet Labels: " + (", ".join(diet_labels) if diet_labels else "None")
+                    )
+                    st.text(
+                        f"Weight: {total_weight} g"
+                        if total_weight is not None
+                        else "Weight: Not available"
+                    )
+                except Exception:
+                    st.error(
+                        "Could not fetch nutrition data. Check your Edamam API credentials."
+                    )
+        except Exception:
+            st.error(
+                "Food detection failed. Check your Roboflow API credentials and try again."
+            )
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
+
+
+if __name__ == "__main__":
+    main()
