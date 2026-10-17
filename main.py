@@ -15,10 +15,17 @@ project = rf.workspace().project("-food-detection")
 model = project.version(1).model
 
 # infer on a local image
-def detect_image(image):
-    result=(model.predict(image, confidence=40, overlap=30).json())
 
-    return result['predictions'][0]['class']
+def detect_image(image):
+    result = model.predict(image, confidence=30, overlap=30).json()
+
+    predictions = result.get("predictions", [])
+
+    if not predictions:
+        return None
+
+    return predictions[0].get("class")
+
 
 
 def getcalories(food_item):
@@ -68,15 +75,26 @@ def main():
         # Perform object detection when 'Detect' button is clicked
         if st.button("Detect"):
             # Call object detection function
-            detected_image = detect_image(path)
-            calories = getcalories(detected_image)
-            # Display the detected image
-            str(st.text("Food Item: "+ detected_image))
-            # print(type(st.text(calories)))
-            st.text("Calories: "+str(calories[0]))
-            st.text("Diet: "+str(calories[1]))
-            st.text("Weight: "+str(calories[2])+' g')
-            st.text("Remaining calory intake: "+str(calculate_tdee(float(calculate_bmr(weight,height,age,gender)),activity_level)-calories[0]))
+          
+                detected_image = detect_image(path)
+
+                if not detected_image:
+                    st.warning("No food detected. Please upload a clear image of food.")
+                else:
+                    st.success(f"Food Item Detected: {detected_image.title()}")
+
+                    calories = getcalories(detected_image)
+                    st.text("Food Item: " + detected_image.title())
+                    st.text("Calories: " + str(calories[0]))
+                    st.text("Diet: " + str(calories[1]))
+                    st.text("Weight: " + str(calories[2]) + " g")
+                    st.text(
+                        "Remaining calorie intake: " +
+                        str(calculate_tdee(
+                            float(calculate_bmr(weight, height, age, gender)),
+                            activity_level
+                        ) - calories[0])
+                    )
 
 if __name__ == '__main__':
     main()
